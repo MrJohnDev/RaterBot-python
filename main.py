@@ -159,10 +159,8 @@ async def HandleTextReplyAsync(msg: Message):
 
     if (msg.from_user.id == from_user.id):
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=reply_to.message_id)
-    
-    sql = f"INSERT INTO Post (ChatId, PosterId, MessageId, timestamp) VALUES ( ?, ?, ?, ?);"
-    cursor = db_connection.cursor()
-    cursor.execute(sql, (msg.chat.id, from_user.id, new_message.message_id, datetime.utcnow().timestamp()))
+
+    await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
 
 @router.message(F.photo | F.video | F.document)
 async def handle_media_message(msg: Message):
@@ -172,15 +170,16 @@ async def handle_media_message(msg: Message):
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
                                                  reply_markup=new_post_ikm, caption=MentionUsername(from_user), parse_mode="MarkdownV2")
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
-
-        with db_connection:
-            sql = f"INSERT INTO Post (ChatId, PosterId, MessageId, timestamp) VALUES ( ?, ?, ?, ?);"
-            cursor = db_connection.cursor()
-            cursor.execute(sql, (msg.chat.id, from_user.id,
-                           new_message.message_id, datetime.utcnow().timestamp()))
+        await InsertIntoPosts(msg.chat.id, from_user.id,new_message.message_id)
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
+
+async def InsertIntoPosts(chat_id: int, poster_id: int, message_id: int):
+    with db_connection:
+        sql = f"INSERT INTO Post (ChatId, PosterId, MessageId, timestamp) VALUES ( ?, ?, ?, ?);"
+        cursor = db_connection.cursor()
+        cursor.execute(sql, (chat_id, poster_id, message_id, datetime.utcnow().timestamp()))
 
 def MentionUsername(from_user: User | None) -> str:
     _should_be_escaped = set('_*[]()~`>#+-=|{}.!')
