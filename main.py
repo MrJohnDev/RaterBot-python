@@ -66,6 +66,8 @@ new_post_ikm = InlineKeyboardMarkup(inline_keyboard=[
 
 # Functions
 async def init_and_migrate_db():
+    db_connection.execute("PRAGMA synchronous = OFF;")
+    db_connection.execute("PRAGMA journal_mode = WAL;")
     await migrate_database()
 
 
@@ -85,62 +87,90 @@ async def migrate_database():
 @router.callback_query()
 async def handle_callback_data(query: CallbackQuery):
     msg = query.message
-    if query.data in ["+", "-"]:
-        logging.info("Valid callback request")
-        with db_connection:
-            cursor = db_connection.cursor()
-            sql = f"SELECT * FROM {Post.__tablename__} WHERE ChatId = ? AND MessageId = ?;"
-            cursor.execute(sql, (msg.chat.id, msg.message_id))
-            data = cursor.fetchone()
+    # chatAndMessageIdParams = {'ChatId': msg.chat.id, 'MessageId': msg.message_id}
+    chatAndMessageIdParams = (msg.chat.id, msg.message_id)
+    updateData = query.data
+    if (updateData not in ["+", "-"]):
+        logging.warning(f"Invalid callback query data: {updateData}")
+        return
 
-            if data is None:
-                print(
-                    f"Cannot find post in the database, ChatId = {msg.chat.id}, MessageId = {msg.message_id}")
-                return
-            
-            post = Post(*data)
+    logging.info("Valid callback request")
+    with db_connection:
+        cursor = db_connection.cursor()
+        sql = f"SELECT * FROM {Post.__tablename__} WHERE ChatId = ? AND MessageId = ?;"
+        cursor.execute(sql, (msg.chat.id, msg.message_id))
+        data = cursor.fetchone()
 
-            if post.PosterId == query.from_user.id:
-                await msg.bot.answer_callback_query(query.id, "Нельзя голосовать за свои посты!")
-                return
-
-            sql = f"SELECT * FROM {Interaction.__tablename__} WHERE ChatId = ? AND MessageId = ?;"
-            cursor.execute(sql, (msg.chat.id, msg.message_id))
-            data = cursor.fetchall()
-            interactions = [Interaction(*row) for row in data]
-            interaction = next(
-                (i for i in interactions if i.UserId == query.from_user.id), None)
-
-            if interaction is not None:
-                new_reaction = query.data == "+"
-                if new_reaction == interaction.Reaction:
-                    reaction =  "👍" if new_reaction else "👎"
-                    await msg.bot.answer_callback_query(query.id, f"Ты уже поставил {reaction} этому посту!")
-                    print("No need to update reaction")
-                    return
-                sql = f"UPDATE {Interaction.__tablename__} SET Reaction = ? WHERE Id = ?;"
-                cursor.execute(sql, (new_reaction, interaction.Id))
-                interaction.Reaction = new_reaction
-            else:
-                sql = f"INSERT INTO {Interaction.__tablename__} (ChatId, UserId, MessageId, Reaction, PosterId) VALUES (?, ?, ?, ?, ?);"
-                cursor.execute(sql, (msg.chat.id, query.from_user.id,
-                               msg.message_id, query.data == "+", post.PosterId))
-                interactions.append(Interaction(reaction=query.data == "+"))
-
-            likes = sum(1 for i in interactions if i.Reaction)
-            dislikes = len(interactions) - likes
-
-            plus_text = f"{likes} 👍" if likes > 0 else "👍"
-            minus_text = f"{dislikes} 👎" if dislikes > 0 else "👎"
-
-            ikm = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(callback_data="+", text=plus_text),
-                 InlineKeyboardButton(callback_data="-", text=minus_text)]
-            ])
+        if data is None:
+            print(
+                f"Cannot find post in the database, ChatId = {msg.chat.id}, MessageId = {msg.message_id}")
             try:
-                await msg.bot.edit_message_reply_markup(chat_id=msg.chat.id, message_id=msg.message_id, reply_markup=ikm)
-            except Exception as ex:
-                print(ex, "Edit Message Reply Markup")
+                await msg.bot.edit_message_reply_markup(msg.chat.id, msg.message_id, InlineKeyboardMarkup());
+            except Exception as e:
+                logging.warning(e, "Unable to set empty reply markup, trying to delete post")
+                await msg.bot.delete_message(msg.chat.id, msg.message_id)
+            sql = f"SELECT * FROM {Interaction.__tablename__} WHERE {Interaction.ChatId} = @ChatId AND {Interaction.MessageId} = @MessageId;"
+            await db_connection.execute(sql, chatAndMessageIdParams)
+            return
+        
+        post = Post(*data)
+
+        if post.PosterId == query.from_user.id:
+            await msg.bot.answer_callback_query(query.id, "Нельзя голосовать за свои посты!")
+            return
+
+        sql = f"SELECT * FROM {Interaction.__tablename__} WHERE ChatId = ? AND MessageId = ?;"
+        cursor.execute(sql, chatAndMessageIdParams)
+        data = cursor.fetchall()
+        interactions = [Interaction(*row) for row in data]
+        interaction = next(
+            (i for i in interactions if i.UserId == query.from_user.id), None)
+
+        new_reaction = updateData == "+"
+        if interaction is not None:
+            if new_reaction == interaction.Reaction:
+                reaction =  "👍" if new_reaction else "👎"
+                await msg.bot.answer_callback_query(query.id, f"Ты уже поставил {reaction} этому посту")
+                print("No need to update reaction")
+                return
+            sql = f"UPDATE {Interaction.__tablename__} SET Reaction = ? WHERE Id = ?;"
+            cursor.execute(sql, (new_reaction, interaction.Id))
+            interaction.Reaction = new_reaction
+        else:
+            sql = f"INSERT INTO {Interaction.__tablename__} (ChatId, UserId, MessageId, Reaction, PosterId) VALUES (?, ?, ?, ?, ?);"
+            cursor.execute(sql, (msg.chat.id, query.from_user.id,
+                           msg.message_id, new_reaction, post.PosterId))
+            interactions.append(Interaction(reaction=new_reaction))
+
+        likes = sum(1 for i in interactions if i.Reaction)
+        dislikes = len(interactions) - likes
+
+        if (datetime.utcnow() - timedelta(minutes=5)).timestamp() > post.Timestamp and dislikes > 2 * likes + 3:
+            logging.info(f"Deleting post. Dislikes = {dislikes}, Likes = {likes}")
+            await msg.bot.delete_message(msg.chat.id, msg.message_id)
+
+            sql = f"DELETE FROM {Post.__tablename__} WHERE {Post.Id} = @Id;"
+            await db_connection.execute(sql, { post.Id })
+
+            sql = f"DELETE FROM {Interaction.__tablename__} WHERE {Interaction.ChatId} = @ChatId AND {Interaction.MessageId} = @MessageId;"
+            deletedRows = await db_connection.execute(sql, chatAndMessageIdParams)
+            logging.debug(f"Deleted {deletedRows} rows from Interaction")
+            
+            await msg.bot.answer_callback_query(query.id, "Твой голос стал решающей каплей, этот пост удалён")
+            return
+            
+
+        plus_text = f"{likes} 👍" if likes > 0 else "👍"
+        minus_text = f"{dislikes} 👎" if dislikes > 0 else "👎"
+
+        ikm = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=plus_text, callback_data="+"),
+             InlineKeyboardButton(text=minus_text, callback_data="-")]
+        ])
+        try:
+            await msg.bot.edit_message_reply_markup(msg.chat.id, msg.message_id, reply_markup=ikm)
+        except Exception as ex:
+            print(ex, "Edit Message Reply Markup")
 
 
 @router.message(F.text == f"/text@{bot_name}" or F.text == "/text")
@@ -194,7 +224,7 @@ async def HandleTopWeekPosts(msg: Message):
     
     week_ago = (datetime.utcnow() - timedelta(days=7)).timestamp()
 
-    sql_params = {'DaysAgo': week_ago, 'ChatId': chat.id}
+    sql_params = {'TimeAgo': week_ago, 'ChatId': chat.id}
     sql  = GetMessageIdPlusCountPosterIdSql()
     plus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
 
@@ -262,7 +292,7 @@ async def HandleTopMonthAuthors(msg: Message):
     month_ago = (datetime.utcnow() - timedelta(days=30)).timestamp()
 
 
-    sql_params = {'DaysAgo': month_ago, 'ChatId': chat.id}
+    sql_params = {'TimeAgo': month_ago, 'ChatId': chat.id}
     sql  = GetMessageIdPlusCountPosterIdSql()
     plus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
 
@@ -336,7 +366,7 @@ def GetMessageIdPlusCountPosterIdSql() -> str:
     sql_plus = (
         f"SELECT {Interaction.MessageId}, COUNT(*), {Interaction.PosterId}"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = true"
+        f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @TimeAgo AND {Interaction.Reaction} = true"
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_plus
@@ -346,7 +376,7 @@ def GetMessageIdMinusCountSql() -> str:
     sql_minus = (
         f"SELECT {Interaction.MessageId}, COUNT(*)"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = false"
+        f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @TimeAgo AND {Interaction.Reaction} = false"
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_minus
