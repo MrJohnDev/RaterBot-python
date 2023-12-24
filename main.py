@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram.enums import ChatType
+from aiogram.filters import and_f, or_f, invert_f
 
 from models import Post, Interaction  # Импорт классов из models.py
 
@@ -302,10 +303,12 @@ async def HandleTopMonthAuthors(msg: Message):
     # Отправляем сообщение
     await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
   
-    
 
+@router.message(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))
+async def handle_media_message(msg: Message):
+    logging.info("Media message that should be ignored")
 
-
+# @router.message(and_f((F.photo | F.video | F.document), invert_f(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))))
 @router.message(F.photo | F.video | F.document)
 async def handle_media_message(msg: Message):
     logging.info("New valid media message")
