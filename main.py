@@ -222,7 +222,7 @@ async def HandleTopWeekPosts(msg: Message):
         plus[key] -= minus.get(key, 0)
 
     # Сортируем по убыванию и берем топ-10
-    top_ten = sorted(plus.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_posts = sorted(plus.items(), key=lambda x: x[1], reverse=True)[:20]
 
 
     userIdToUser = {}
@@ -236,7 +236,7 @@ async def HandleTopWeekPosts(msg: Message):
     message = "Топ постов за последнюю неделю:\n"
     i = 0
     sg = chat.type == ChatType.SUPERGROUP
-    for item in top_ten:
+    for item in top_posts:
         plus_symb = '\+'
 
         userId = messageIdToUserId[item[0]]
@@ -333,7 +333,7 @@ def GetMessageIdPlusCountPosterIdSql() -> str:
     sql_plus = (
         f"SELECT {Interaction.MessageId}, COUNT(*), {Interaction.PosterId}"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = true"
+        f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = true"
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_plus
@@ -343,7 +343,7 @@ def GetMessageIdMinusCountSql() -> str:
     sql_minus = (
         f"SELECT {Interaction.MessageId}, COUNT(*)"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = false"
+        f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = false"
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_minus
