@@ -65,8 +65,9 @@ new_post_ikm = InlineKeyboardMarkup(inline_keyboard=[
 
 # Functions
 async def init_and_migrate_db():
-    db_connection.execute("PRAGMA synchronous = OFF;")
-    db_connection.execute("PRAGMA journal_mode = WAL;")
+    db_connection.execute("PRAGMA synchronous = NORMAL;")
+    db_connection.execute("PRAGMA vacuum;")
+    db_connection.execute("PRAGMA temp_store = memory;")
     await migrate_database()
 
 
@@ -108,7 +109,7 @@ async def handle_callback_data(query: CallbackQuery):
             except Exception as e:
                 logging.warning(e, "Unable to set empty reply markup, trying to delete post")
                 await msg.bot.delete_message(msg.chat.id, msg.message_id)
-            sql = f"SELECT * FROM {Interaction.__tablename__} WHERE {Interaction.ChatId} = @ChatId AND {Interaction.MessageId} = @MessageId;"
+            sql = f"SELECT * FROM {Post.__tablename__} WHERE {Post.ChatId} = @ChatId AND {Post.MessageId} = @MessageId;"
             await db_connection.execute(sql, chatAndMessageIdParams)
             return
         
@@ -171,30 +172,86 @@ async def handle_callback_data(query: CallbackQuery):
         except Exception as ex:
             print(ex, "Edit Message Reply Markup")
 
+    if (msg.message_id % 50 == 0):
+        logging.info('DB optimize')
+        await db_connection.execute("PRAGMA optimize;")
+
 
 @router.message(Command("text"))
-async def handle_media_message(msg: Message):
+async def handle_text_message(msg: Message):
     try:
-        if(msg.reply_to_message != None):
-            if (msg.reply_to_message.from_user.id == bot_id):
-                m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
-                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
-                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
-                return
+        if(msg.reply_to_message == None):
+            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
 
-            if(not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
-                m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
+        
+        if (msg.reply_to_message.from_user.id != bot_id):
+            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
 
-                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
-                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
-                return
-        else:
+        if(not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
             m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
 
             asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
             asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
             return
         await HandleTextReplyAsync(msg)
+    except Exception as ex:
+        print(ex, "Cannot handle media message")
+
+@router.message(Command("delete"))
+async def handle_delete_message(msg: Message):
+    try:
+        if(msg.reply_to_message == None):
+            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
+        
+        if msg.reply_to_message.from_user is None: return
+        
+        
+
+        if (msg.reply_to_message.from_user.id != bot_id):
+            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
+        
+        sqlParams = (msg.chat.id, msg.reply_to_message.message_id)
+        sql = f"SELECT * FROM {Post.__tablename__} WHERE {Post.ChatId} = @ChatId AND {Post.MessageId} = @MessageId"
+        
+ 
+        post = db_connection.execute(sql, sqlParams).fetchone()
+
+        if (post == None):
+            m = await msg.bot.send_message(msg.chat.id, "Это сообщение нельзя удалить")
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
+
+        if msg.from_user is None: return
+
+        if (post[2] != msg.from_user.id):
+            m = await msg.bot.send_message(msg.chat.id, "Нельзя удалить чужой пост")
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
+        
+        await msg.bot.delete_message(msg.chat.id, msg.reply_to_message.message_id)
+        await msg.bot.delete_message(msg.chat.id, msg.message_id)
+        sql = f"DELETE FROM {Interaction.__tablename__} WHERE {Interaction.ChatId} = @ChatId AND {Interaction.MessageId} = @MessageId;"
+        db_connection.execute(sql, sqlParams)
+        sql = f"DELETE FROM {Post.__tablename__} WHERE {Post.ChatId} = @ChatId AND {Post.MessageId} = @MessageId;"
+        db_connection.execute(sql, sqlParams)
+            
+            
+        
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
