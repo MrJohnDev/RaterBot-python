@@ -112,6 +112,8 @@ async def handle_callback_data(query: CallbackQuery):
             if interaction is not None:
                 new_reaction = query.data == "+"
                 if new_reaction == interaction.Reaction:
+                    reaction =  "👍" if new_reaction else "👎"
+                    await msg.bot.answer_callback_query(query.id, f"Ты уже поставил {reaction} этому посту!")
                     print("No need to update reaction")
                     return
                 sql = f"UPDATE {Interaction.__tablename__} SET Reaction = ? WHERE Id = ?;"
@@ -237,17 +239,15 @@ async def HandleTopWeekPosts(msg: Message):
     i = 0
     sg = chat.type == ChatType.SUPERGROUP
     for item in top_ten:
-        i += 1
-
         plus_symb = '\+'
-        place = {1: '🥇', 2: '🥈', 3: '🥉'}.get(i, f"{i}")
 
         userId = messageIdToUserId[item[0]]
         user = userIdToUser[userId]
         
         link = link_to_supergroup_message(chat.id, item[0]) if sg else link_to_group_with_name_message(chat, item[0])
-        message += f"{place} [От {UserEscaped(user)}]({link}) "
+        message += f"{GetPlace(i)} [От {UserEscaped(user)}]({link}) "
         message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
+        i += 1
 
     # Отправляем сообщение
     await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
@@ -276,6 +276,10 @@ async def InsertIntoPosts(chat_id: int, poster_id: int, message_id: int):
     except Exception as ex:
         print(ex, "Cannot Insert Into Post")
 
+
+
+
+
 def link_to_supergroup_message(chat_id: int, message_id: int):
     return f"https://t.me/c/{str(chat_id)[4:]}/{message_id}"
 
@@ -284,7 +288,7 @@ def link_to_group_with_name_message(chat: Chat, message_id: int):
 
 def MentionUsername(from_user: User | None) -> str:
     whoEscaped = UserEscaped(from_user)
-    return f"От [{whoEscaped}](tg://user?id={from_user.Id})"
+    return f"От [{whoEscaped}](tg://user?id={from_user.id})"
 
 def UserEscaped(from_user: User | None) -> str:
     _should_be_escaped = set('_*[]()~`>#+-=|{}.!')
@@ -313,6 +317,8 @@ def AtMentionUsername(from_user: User | None) -> str:
         return f"поехавшего {who} без ника в телеге"
     return f"От @{from_user.username}"
  
+def GetPlace(i: int) -> str:
+    return {1: '🥇', 2: '🥈', 3: '🥉'}.get(i, f"{i + 1}")
 
 async def main() -> None:
     global bot_id

@@ -36,5 +36,5 @@ class Interaction(Base):
         self.ChatId: int = chat_id
         self.PosterId: int = poster_id
         self.MessageId: int = message_id
-        self.User_id: int = user_id
+        self.UserId: int = user_id
         self.Reaction: bool = reaction
