@@ -148,9 +148,10 @@ async def handle_media_message(msg: Message):
 
 
 async def HandleTextReplyAsync(msg: Message):
+    logging.info("New valid text message")
     reply_to = msg.reply_to_message
     from_user = reply_to.from_user
-    new_message = await msg.bot.send_message(msg.chat.id, f"От {MentionUsername(from_user)}:\n{reply_to.text}", reply_markup= new_post_ikm)
+    new_message = await msg.bot.send_message(msg.chat.id, f"{AtMentionUsername(from_user)}:\n{reply_to.text}", reply_markup= new_post_ikm)
     try:
         await msg.bot.delete_message(msg.chat.id, msg.message_id)
     except Exception as ex:
@@ -165,11 +166,11 @@ async def HandleTextReplyAsync(msg: Message):
 
 @router.message(F.photo | F.video | F.document)
 async def handle_media_message(msg: Message):
-    logging.debug("Valid media message")
+    logging.info("New valid media message")
     from_user = msg.from_user
     try:
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
-                                                 reply_markup=new_post_ikm, caption=f"От {MentionUsername(from_user)}")
+                                                 reply_markup=new_post_ikm, caption=MentionUsername(from_user), parse_mode="MarkdownV2")
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
 
         with db_connection:
@@ -182,12 +183,31 @@ async def handle_media_message(msg: Message):
 
 
 def MentionUsername(from_user: User | None) -> str:
+    _should_be_escaped = set('_*[]()~`>#+-=|{}.!')
+
+    first_name = from_user.first_name or ""
+    last_name = from_user.last_name or ""
+
+    who = f"{first_name} {last_name}".strip()
+
+    if(not who or who.isspace()):
+        who = "анонима"
+    
+    who_escaped = ''
+    for c in who:
+        if c in _should_be_escaped:
+            who_escaped += '\\'
+        who_escaped += c
+
+    return f"От [{who_escaped}](tg://user?id={from_user.id})"
+
+def AtMentionUsername(from_user: User | None) -> str:
     if(not from_user.username or from_user.username.isspace()):
         first_name = from_user.first_name or ""
         last_name = from_user.last_name or ""
         who = f"{first_name} {last_name}".strip() or "анонима"
         return f"поехавшего {who} без ника в телеге"
-    return f"@{from_user.username}"
+    return f"От @{from_user.username}"
  
 
 async def main() -> None:
