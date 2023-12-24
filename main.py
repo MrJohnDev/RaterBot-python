@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram.enums import ChatType
-from aiogram.filters import and_f, or_f, invert_f
+from aiogram.filters import and_f, or_f, invert_f, Command
 
 from models import Post, Interaction  # Импорт классов из models.py
 
@@ -62,7 +62,6 @@ new_post_ikm = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="👍", callback_data="+")
     , InlineKeyboardButton(text="👎", callback_data="-")]
 ])
-
 
 # Functions
 async def init_and_migrate_db():
@@ -173,27 +172,42 @@ async def handle_callback_data(query: CallbackQuery):
             print(ex, "Edit Message Reply Markup")
 
 
-@router.message(F.text == f"/text@{bot_name}" or F.text == "/text")
+@router.message(Command("text"))
 async def handle_media_message(msg: Message):
     try:
         if(msg.reply_to_message != None):
-            if (not msg.reply_to_message.from_user.id == bot_id):
-                await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
+            if (msg.reply_to_message.from_user.id == bot_id):
+                m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
+                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
                 return
-            if (not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
-                await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+
+            if(not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
+                m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+
+                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+                asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
                 return
-            await HandleTextReplyAsync(msg)
         else:
-            await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, m.message_id))
+            asyncio.create_task(remove_after_some_time(msg.bot, msg.chat, msg.message_id))
+            return
+        await HandleTextReplyAsync(msg)
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
 
 async def HandleTextReplyAsync(msg: Message):
     logging.info("New valid text message")
+
     reply_to = msg.reply_to_message
+    if reply_to is None: return
+
     from_user = reply_to.from_user
+    if from_user is None: return
+
     new_message = await msg.bot.send_message(msg.chat.id, f"{AtMentionUsername(from_user)}:\n{reply_to.text}", reply_markup= new_post_ikm)
     try:
         await msg.bot.delete_message(msg.chat.id, msg.message_id)
@@ -205,12 +219,12 @@ async def HandleTextReplyAsync(msg: Message):
 
     await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
 
-@router.message(F.text == f"/top_posts_week@{bot_name}" or F.text == "/top_posts_week")
+@router.message(Command("top_posts_week"))
 async def handle_top_week_posts(msg: Message):
     logging.info("New top posts week")
     await HandleTopWeekPosts(msg)
 
-@router.message(F.text == f"/top_authors_month@{bot_name}" or F.text == "/top_authors_month")
+@router.message(Command("top_authors_month"))
 async def handle_top_authors_month(msg: Message):
     logging.info("New top authors month")
     await HandleTopMonthAuthors(msg)
@@ -273,13 +287,16 @@ async def HandleTopWeekPosts(msg: Message):
         userId = messageIdToUserId[item[0]]
         user = userIdToUser[userId]
         
-        link = link_to_supergroup_message(chat.id, item[0]) if sg else link_to_group_with_name_message(chat, item[0])
+        link = link_to_supergroup_message(chat, item[0]) if sg else link_to_group_with_name_message(chat, item[0])
         message += f"{GetPlace(i)} [От {UserEscaped(user)}]({link}) "
         message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
         i += 1
 
     # Отправляем сообщение
-    await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+    m = await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+
+    asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
+    asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
 
 
 async def HandleTopMonthAuthors(msg: Message):
@@ -327,11 +344,14 @@ async def HandleTopMonthAuthors(msg: Message):
     i = 0
     for item in top_authors:
         user = userIdToUser[item['Key']]
-        message += f"{GetPlace(i)} {GetFirstLastName(user)} очков: {item['Hindex']}, апвоутов: {item['Likes']}"
+        message += f"{GetPlace(i)} {UserEscaped(user)} очков: {item['Hindex']}, апвоутов: {item['Likes']}\n"
         i += 1
 
     # Отправляем сообщение
-    await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+    m = await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+
+    asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
+    asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
   
 
 @router.message(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))
@@ -343,6 +363,8 @@ async def handle_media_message(msg: Message):
 async def handle_media_message(msg: Message):
     logging.info("New valid media message")
     from_user = msg.from_user
+    if(from_user is None): return
+
     try:
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
                                                  reply_markup=new_post_ikm, caption=MentionUsername(from_user), parse_mode="MarkdownV2")
@@ -381,8 +403,8 @@ def GetMessageIdMinusCountSql() -> str:
     )
     return sql_minus
 
-def link_to_supergroup_message(chat_id: int, message_id: int):
-    return f"https://t.me/c/{str(chat_id)[4:]}/{message_id}"
+def link_to_supergroup_message(chat: Chat, message_id: int):
+    return f"https://t.me/c/{str(chat.id)[4:]}/{message_id}"
 
 def link_to_group_with_name_message(chat: Chat, message_id: int):
     return f"https://t.me/{chat.username}/{message_id}"
@@ -402,7 +424,7 @@ def UserEscaped(from_user: User | None) -> str:
             who_escaped += '\\'
         who_escaped += c
 
-    return  str(who_escaped)
+    return str(who_escaped)
 
 def AtMentionUsername(from_user: User | None) -> str:
     if(not from_user.username or from_user.username.isspace()):
@@ -418,9 +440,16 @@ def GetFirstLastName(from_user: User | None) -> str:
     if(not who or who.isspace()):
         who = "анонима"
     return who
+
+async def remove_after_some_time(bot_client: Bot, chat: Chat, message_id):
+    await asyncio.sleep(10 * 60)  # Подождать 10 минут
+    await bot_client.delete_message(chat.id, message_id)
+
  
+
+
 def GetPlace(i: int) -> str:
-    return {0: '🥇', 1: '🥈', 2: '🥉'}.get(i, f"{i + 1}")
+    return {0: '🥇', 1: '🥈', 2: '🥉'}.get(i, f" {i + 1}")
 
 async def main() -> None:
     global bot_id
