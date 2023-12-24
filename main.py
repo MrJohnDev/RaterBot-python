@@ -150,7 +150,7 @@ async def handle_media_message(msg: Message):
 async def HandleTextReplyAsync(msg: Message):
     reply_to = msg.reply_to_message
     from_user = reply_to.from_user
-    new_message = await msg.bot.send_message(msg.chat.id, f"От @{from_user.username}:\n{reply_to.text}", reply_markup= new_post_ikm)
+    new_message = await msg.bot.send_message(msg.chat.id, f"От {MentionUsername(from_user)}:\n{reply_to.text}", reply_markup= new_post_ikm)
     try:
         await msg.bot.delete_message(msg.chat.id, msg.message_id)
     except Exception as ex:
@@ -168,11 +168,8 @@ async def handle_media_message(msg: Message):
     logging.debug("Valid media message")
     from_user = msg.from_user
     try:
-        who = GetFirstLast(from_user)
-
-        caption = f"От [{who}](https://t.me/{from_user.username})"
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
-                                                 reply_markup=new_post_ikm, caption=caption, parse_mode="MarkdownV2")
+                                                 reply_markup=new_post_ikm, caption=f"От {MentionUsername(from_user)}")
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
 
         with db_connection:
@@ -184,11 +181,13 @@ async def handle_media_message(msg: Message):
         print(ex, "Cannot handle media message")
 
 
-def GetFirstLast(from_user: User | None) -> str:
-    first_name = from_user.first_name or ""
-    last_name = from_user.last_name or ""
-    who = f"{first_name} {last_name}".strip() or "анонима"
-    return who
+def MentionUsername(from_user: User | None) -> str:
+    if(not from_user.username or from_user.username.isspace()):
+        first_name = from_user.first_name or ""
+        last_name = from_user.last_name or ""
+        who = f"{first_name} {last_name}".strip() or "анонима"
+        return f"поехавшего {who} без ника в телеге"
+    return f"@{from_user.username}"
  
 
 async def main() -> None:
