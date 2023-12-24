@@ -154,8 +154,8 @@ async def HandleTextReplyAsync(msg: Message):
     new_message = await msg.bot.send_message(msg.chat.id, f"{AtMentionUsername(from_user)}:\n{reply_to.text}", reply_markup= new_post_ikm)
     try:
         await msg.bot.delete_message(msg.chat.id, msg.message_id)
-    except Exception as ex:
-        print(ex, "Cannot handle text reply")
+    except Exception as ex: # TODO replace Exception
+        logging.warning(ex, "Unable to delete message in HandleTextReplyAsync, duplicated update?")
 
     if (msg.from_user.id == from_user.id):
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=reply_to.message_id)
