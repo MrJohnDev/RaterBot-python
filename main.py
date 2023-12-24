@@ -193,12 +193,13 @@ async def HandleTopWeekPosts(msg: Message):
     
     week_ago = (datetime.utcnow() - timedelta(days=7)).timestamp()
 
-    sql_plus = GetMessageIdPlusCountPosterIdSql(chat.id, week_ago)
+    sql_params = {'DaysAgo': week_ago, 'ChatId': chat.id}
+    sql  = GetMessageIdPlusCountPosterIdSql()
+    plus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
 
-    plus_query = db_connection.execute(sql_plus)
 
-    plus = {MessageId: PlusCount for MessageId, PlusCount, PosterId in plus_query.fetchall()}
-    messageIdToUserId = {MessageId: PosterId for MessageId, PlusCount, PosterId in plus_query.fetchall()}
+    plus = dict(zip(plus_query['MessageId'], plus_query['COUNT(*)']))
+    messageIdToUserId = dict(zip(plus_query['MessageId'], plus_query['PosterId']))
 
     # Если нет плюсов, отправляем сообщение и завершаем выполнение
     if not plus:
@@ -207,11 +208,11 @@ async def HandleTopWeekPosts(msg: Message):
         return
     
     # Запрос для получения минусов
-    sql_minus = GetMessageIdMinusCountSql(chat.id, week_ago)
+    sql = GetMessageIdMinusCountSql()
     
-    minus_query = db_connection.execute(sql_minus)
+    minus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
     
-    minus = {MessageId: MinusCount for MessageId, MinusCount in minus_query.fetchall()}
+    minus = dict(zip(minus_query['MessageId'], minus_query['COUNT(*)']))
 
     userIdToUser = {}
 
@@ -261,7 +262,7 @@ async def HandleTopMonthAuthors(msg: Message):
 
 
     sql_params = {'DaysAgo': month_ago, 'ChatId': chat.id}
-    sql  = GetMessageIdPlusCountPosterIdSql(chat.id, month_ago)
+    sql  = GetMessageIdPlusCountPosterIdSql()
     plus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
 
     plus = dict(zip(plus_query['MessageId'], plus_query['COUNT(*)']))
@@ -328,21 +329,21 @@ async def InsertIntoPosts(chat_id: int, poster_id: int, message_id: int):
         print(ex, "Cannot Insert Into Post")
 
 
-def GetMessageIdPlusCountPosterIdSql(chat_id: int, week_ago: int) -> str:
+def GetMessageIdPlusCountPosterIdSql() -> str:
     sql_plus = (
         f"SELECT {Interaction.MessageId}, COUNT(*), {Interaction.PosterId}"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = {chat_id} AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = true"
+        f" WHERE {Post.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = true"
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_plus
 
 
-def GetMessageIdMinusCountSql(chat_id: int, week_ago: int) -> str:
+def GetMessageIdMinusCountSql() -> str:
     sql_minus = (
         f"SELECT {Interaction.MessageId}, COUNT(*)"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = {chat_id} AND {Post.Timestamp} > {week_ago} AND {Interaction.Reaction} = false"
+        f" WHERE {Post.ChatId} = @ChatId AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = false"
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_minus
@@ -386,7 +387,7 @@ def GetFirstLastName(from_user: User | None) -> str:
     return who
  
 def GetPlace(i: int) -> str:
-    return {1: '🥇', 2: '🥈', 3: '🥉'}.get(i, f"{i + 1}")
+    return {0: '🥇', 1: '🥈', 2: '🥉'}.get(i, f"{i + 1}")
 
 async def main() -> None:
     global bot_id
