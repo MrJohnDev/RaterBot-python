@@ -39,6 +39,7 @@ router = Router()
 update_limit = 100
 timeout = 120
 db_path = "sqlite.db"
+bot_id = 0
 
 
 # Initialize SQLite
@@ -133,6 +134,9 @@ async def handle_callback_data(query: CallbackQuery):
 async def handle_media_message(msg: Message):
     try:
         if(msg.reply_to_message != None):
+            if (not msg.reply_to_message.from_user.id == bot_id):
+                await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
+                return
             if (not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
                 await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
                 return
@@ -188,8 +192,10 @@ def GetFirstLast(from_user: User | None) -> str:
  
 
 async def main() -> None:
+    global bot_id
     await init_and_migrate_db()
     bot = Bot(token=bot_token)
+    bot_id = (await bot.get_me()).id
     dp = Dispatcher()
     dp.include_routers(router)
     logging.info('bot started')
