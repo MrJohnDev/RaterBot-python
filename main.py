@@ -15,10 +15,11 @@ from aiogram import Bot, Dispatcher
 from aiogram import Router, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message, User, Chat
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from alembic.config import Config
 from alembic import command
+
+import pandas as pd
+from itertools import count
 
 from dotenv import load_dotenv
 
@@ -175,9 +176,13 @@ async def HandleTextReplyAsync(msg: Message):
 
 @router.message(F.text == f"/top_posts_week@{bot_name}" or F.text == "/top_posts_week")
 async def handle_top_week_posts(msg: Message):
-    logging.info("New top posts")
+    logging.info("New top posts week")
     await HandleTopWeekPosts(msg)
 
+@router.message(F.text == f"/top_authors_month@{bot_name}" or F.text == "/top_authors_month")
+async def handle_top_authors_month(msg: Message):
+    logging.info("New top authors month")
+    await HandleTopMonthAuthors(msg)
 
 async def HandleTopWeekPosts(msg: Message):
     chat = msg.chat
@@ -187,21 +192,13 @@ async def HandleTopWeekPosts(msg: Message):
         return
     
     week_ago = (datetime.utcnow() - timedelta(days=7)).timestamp()
-    sql_params = {'WeekAgo': week_ago, 'ChatId': chat.id}
 
-    sql_plus = (
-        f"SELECT {Interaction.MessageId}, COUNT(*), {Interaction.PosterId}"
-        f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = {chat.id} AND {Post.Timestamp} > {week_ago} AND {Interaction.Reaction} = true"
-        f" GROUP BY {Interaction.MessageId};"
-    )
+    sql_plus = GetMessageIdPlusCountPosterIdSql(chat.id, week_ago)
 
-    plus_query = db_connection.execute(sql_plus, sql_params).fetchall()
+    plus_query = db_connection.execute(sql_plus)
 
-    # 0 - MessageId
-    # 1 - PosterId
-    plus = {x[0]: x[1] for x in plus_query}
-    messageIdToUserId = {x[0]: x[2] for x in plus_query}
+    plus = {MessageId: PlusCount for MessageId, PlusCount, PosterId in plus_query.fetchall()}
+    messageIdToUserId = {MessageId: PosterId for MessageId, PlusCount, PosterId in plus_query.fetchall()}
 
     # Если нет плюсов, отправляем сообщение и завершаем выполнение
     if not plus:
@@ -210,14 +207,13 @@ async def HandleTopWeekPosts(msg: Message):
         return
     
     # Запрос для получения минусов
-    sql_minus = (
-        f"SELECT {Interaction.MessageId}, COUNT(*)"
-        f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
-        f" WHERE {Post.ChatId} = {chat.id} AND {Post.Timestamp} > {week_ago} AND {Interaction.Reaction} = false"
-        f" GROUP BY {Interaction.MessageId};"
-    )
-    minus_query = db_connection.execute(sql_minus, sql_params).fetchall()
-    minus = {x[0]: x[1] for x in minus_query}
+    sql_minus = GetMessageIdMinusCountSql(chat.id, week_ago)
+    
+    minus_query = db_connection.execute(sql_minus)
+    
+    minus = {MessageId: MinusCount for MessageId, MinusCount in minus_query.fetchall()}
+
+    userIdToUser = {}
 
     # Вычитаем минусы из плюсов
     keys = list(plus.keys())
@@ -234,8 +230,9 @@ async def HandleTopWeekPosts(msg: Message):
         member = await msg.bot.get_chat_member(chat.id, userId)
         userIdToUser[userId] = member.user
 
+
     # Формируем сообщение с топ-10
-    message = ""
+    message = "Топ постов за последнюю неделю:\n"
     i = 0
     sg = chat.type == ChatType.SUPERGROUP
     for item in top_ten:
@@ -251,6 +248,60 @@ async def HandleTopWeekPosts(msg: Message):
 
     # Отправляем сообщение
     await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+
+
+async def HandleTopMonthAuthors(msg: Message):
+    chat = msg.chat
+    if (chat.type != ChatType.SUPERGROUP and (not chat.username or chat.username.isspace())):
+        await msg.bot.send_message(chat, "Этот чат не является супергруппой и не имеет имени: нет возможности оставлять ссылки на посты")
+        logging.info(f"{(HandleTopMonthAuthors)} - unable to link top autors, skipping")
+        return
+    
+    month_ago = (datetime.utcnow() - timedelta(days=30)).timestamp()
+
+
+    sql_params = {'DaysAgo': month_ago, 'ChatId': chat.id}
+    sql  = GetMessageIdPlusCountPosterIdSql(chat.id, month_ago)
+    plus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
+
+    plus = dict(zip(plus_query['MessageId'], plus_query['COUNT(*)']))
+    messageIdToUserId = dict(zip(plus_query['MessageId'], plus_query['PosterId']))
+    
+    # Если нет плюсов, отправляем сообщение и завершаем выполнение
+    if not plus:
+        await msg.bot.send_message(chat.id, "Не найдено заплюсованных постов за последний месяц")
+        logging.info(f"handle_top_month_authors - no upvoted posts, skipping")
+        return
+    
+    # Группировка данных и подсчет H-индекса
+    grouped_data = {}
+    for poster_id, group in plus_query.groupby('PosterId'):
+        h_index = sum(plus_count >= i + 1 for i, plus_count in enumerate(sorted(group['COUNT(*)'], reverse=True)))
+        likes = sum(group['COUNT(*)'])
+        grouped_data[poster_id] = {'Key': poster_id, 'Hindex': h_index, 'Likes': likes}
+
+    # Сортировка и взятие топ-10
+    top_authors = sorted(grouped_data.values(), key=lambda x: (x['Hindex'], x['Likes']), reverse=True)[:10]
+
+    userIdToUser = {}
+
+
+    for messageId, userId in messageIdToUserId.items():
+        member = await msg.bot.get_chat_member(chat.id, userId)
+        userIdToUser[userId] = member.user
+    
+
+    message = "Топ авторов за последний месяц:\n"
+    i = 0
+    for item in top_authors:
+        user = userIdToUser[item['Key']]
+        message += f"{GetPlace(i)} {GetFirstLastName(user)} очков: {item['Hindex']}, апвоутов: {item['Likes']}"
+        i += 1
+
+    # Отправляем сообщение
+    await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+  
+    
 
 
 
@@ -277,8 +328,24 @@ async def InsertIntoPosts(chat_id: int, poster_id: int, message_id: int):
         print(ex, "Cannot Insert Into Post")
 
 
+def GetMessageIdPlusCountPosterIdSql(chat_id: int, week_ago: int) -> str:
+    sql_plus = (
+        f"SELECT {Interaction.MessageId}, COUNT(*), {Interaction.PosterId}"
+        f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
+        f" WHERE {Post.ChatId} = {chat_id} AND {Post.Timestamp} > @DaysAgo AND {Interaction.Reaction} = true"
+        f" GROUP BY {Interaction.MessageId};"
+    )
+    return sql_plus
 
 
+def GetMessageIdMinusCountSql(chat_id: int, week_ago: int) -> str:
+    sql_minus = (
+        f"SELECT {Interaction.MessageId}, COUNT(*)"
+        f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
+        f" WHERE {Post.ChatId} = {chat_id} AND {Post.Timestamp} > {week_ago} AND {Interaction.Reaction} = false"
+        f" GROUP BY {Interaction.MessageId};"
+    )
+    return sql_minus
 
 def link_to_supergroup_message(chat_id: int, message_id: int):
     return f"https://t.me/c/{str(chat_id)[4:]}/{message_id}"
@@ -293,15 +360,9 @@ def MentionUsername(from_user: User | None) -> str:
 def UserEscaped(from_user: User | None) -> str:
     _should_be_escaped = set('_*[]()~`>#+-=|{}.!')
 
-    first_name = from_user.first_name or ""
-    last_name = from_user.last_name or ""
-
-    who = f"{first_name} {last_name}".strip()
-
-    if(not who or who.isspace()):
-        who = "анонима"
-    
+    who = GetFirstLastName(from_user)
     who_escaped = ''
+
     for c in who:
         if c in _should_be_escaped:
             who_escaped += '\\'
@@ -311,11 +372,18 @@ def UserEscaped(from_user: User | None) -> str:
 
 def AtMentionUsername(from_user: User | None) -> str:
     if(not from_user.username or from_user.username.isspace()):
-        first_name = from_user.first_name or ""
-        last_name = from_user.last_name or ""
-        who = f"{first_name} {last_name}".strip() or "анонима"
+        who = GetFirstLastName(from_user)
         return f"поехавшего {who} без ника в телеге"
     return f"От @{from_user.username}"
+
+def GetFirstLastName(from_user: User | None) -> str:
+    first_name = from_user.first_name or ""
+    last_name = from_user.last_name or ""
+    who = f"{first_name} {last_name}".strip()
+
+    if(not who or who.isspace()):
+        who = "анонима"
+    return who
  
 def GetPlace(i: int) -> str:
     return {1: '🥇', 2: '🥈', 3: '🥉'}.get(i, f"{i + 1}")
