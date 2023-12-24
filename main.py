@@ -5,6 +5,7 @@ import sqlite3
 import os
 import sys
 import logging
+from datetime import datetime
 
 from models import Post, Interaction  # Импорт классов из models.py
 
@@ -82,7 +83,7 @@ async def handle_callback_data(query: CallbackQuery):
 
             post = Post(*data)
 
-            if post.poster_id == query.from_user.id:
+            if post.posterId == query.from_user.id:
                 await msg.bot.answer_callback_query(query.id, "Нельзя голосовать за свои посты!")
                 return
 
@@ -91,7 +92,7 @@ async def handle_callback_data(query: CallbackQuery):
             data = cursor.fetchall()
             interactions = [Interaction(*row) for row in data]
             interaction = next(
-                (i for i in interactions if i.user_id == query.from_user.id), None)
+                (i for i in interactions if i.userId == query.from_user.id), None)
 
             if interaction is not None:
                 new_reaction = query.data == "+"
@@ -104,7 +105,7 @@ async def handle_callback_data(query: CallbackQuery):
             else:
                 sql = f"INSERT INTO Interaction (ChatId, UserId, MessageId, Reaction, PosterId) VALUES (?, ?, ?, ?, ?);"
                 cursor.execute(sql, (msg.chat.id, query.from_user.id,
-                               msg.message_id, query.data == "+", post.poster_id))
+                               msg.message_id, query.data == "+", post.posterId))
                 interactions.append(Interaction(Reaction=query.data == "+"))
 
             likes = sum(1 for i in interactions if i.reaction)
@@ -135,10 +136,10 @@ async def handle_media_message(msg: Message):
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
 
         with db_connection:
-            sql = f"INSERT INTO Post (ChatId, PosterId, MessageId) VALUES (?, ?, ?);"
+            sql = f"INSERT INTO Post (ChatId, PosterId, MessageId, timestamp) VALUES ( ?, ?, ?, ?);"
             cursor = db_connection.cursor()
-            cursor.execute(
-                sql, (msg.chat.id, from_user.id, new_message.message_id))
+            cursor.execute(sql, (msg.chat.id, from_user.id,
+                           new_message.message_id, datetime.utcnow().timestamp()))
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
