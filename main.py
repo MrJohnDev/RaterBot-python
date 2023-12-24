@@ -11,7 +11,7 @@ from models import Post, Interaction  # Импорт классов из models.
 
 from aiogram import Bot, Dispatcher
 from aiogram import Router, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message, User
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -27,6 +27,11 @@ if (bot_token is None):
     print('TELEGRAM_MEDIA_RATER_BOT_API is not set')
     sys.exit(1)
 
+bot_name = "mediar0bot"
+if (bot_name is None):
+    print('TELEGRAM_MEDIA_RATER_BOT_NAME is not set')
+    sys.exit(1)
+
 router = Router()
 
 
@@ -34,6 +39,7 @@ router = Router()
 update_limit = 100
 timeout = 120
 db_path = "sqlite.db"
+
 
 # Initialize SQLite
 sqlite3.enable_callback_tracebacks(True)
@@ -72,6 +78,7 @@ async def handle_callback_data(query: CallbackQuery):
     with db_connection:
         cursor = db_connection.cursor()
         if query.data in ["+", "-"]:
+            logging.debug("Valid callback request")
             sql = f"SELECT * FROM Post WHERE ChatId = ? AND MessageId = ?;"
             cursor.execute(sql, (msg.chat.id, msg.message_id))
             data = cursor.fetchone()
@@ -122,13 +129,42 @@ async def handle_callback_data(query: CallbackQuery):
                 print(ex, "EditMessageReplyMarkupAsync")
 
 
+@router.message(F.text == f"/text@{bot_name}" or F.text == "/text")
+async def handle_media_message(msg: Message):
+    try:
+        if(msg.reply_to_message != None):
+            if (not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
+                await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+                return
+            await HandleTextReplyAsync(msg)
+        else:
+            await msg.answer("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
+    except Exception as ex:
+        print(ex, "Cannot handle media message")
+
+
+async def HandleTextReplyAsync(msg: Message):
+    reply_to = msg.reply_to_message
+    from_user = reply_to.from_user
+    new_message = await msg.bot.send_message(msg.chat.id, f"От @{from_user.username}:\n{reply_to.text}", reply_markup= new_post_ikm)
+    try:
+        await msg.bot.delete_message(msg.chat.id, msg.message_id)
+    except Exception as ex:
+        print(ex, "Cannot handle text reply")
+
+    if (msg.from_user.id == from_user.id):
+        await msg.bot.delete_message(chat_id=msg.chat.id, message_id=reply_to.message_id)
+    
+    sql = f"INSERT INTO Post (ChatId, PosterId, MessageId, timestamp) VALUES ( ?, ?, ?, ?);"
+    cursor = db_connection.cursor()
+    cursor.execute(sql, (msg.chat.id, from_user.id, new_message.message_id, datetime.utcnow().timestamp()))
+
 @router.message(F.photo | F.video | F.document)
 async def handle_media_message(msg: Message):
+    logging.debug("Valid media message")
     from_user = msg.from_user
     try:
-        first_name = from_user.first_name or ""
-        last_name = from_user.last_name or ""
-        who = f"{first_name} {last_name}".strip() or "анонима"
+        who = GetFirstLast(from_user)
 
         caption = f"От [{who}](https://t.me/{from_user.username})"
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
@@ -143,6 +179,13 @@ async def handle_media_message(msg: Message):
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
+
+def GetFirstLast(from_user: User | None) -> str:
+    first_name = from_user.first_name or ""
+    last_name = from_user.last_name or ""
+    who = f"{first_name} {last_name}".strip() or "анонима"
+    return who
+ 
 
 async def main() -> None:
     await init_and_migrate_db()
