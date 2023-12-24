@@ -365,6 +365,11 @@ async def handle_media_message(msg: Message):
     from_user = msg.from_user
     if(from_user is None): return
 
+    if (msg.reply_to_message != None):
+        logging.info("Reply media messages should be ignored")
+        return
+       
+
     try:
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
                                                  reply_markup=new_post_ikm, caption=MentionUsername(from_user), parse_mode="MarkdownV2")
