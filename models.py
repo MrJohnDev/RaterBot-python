@@ -14,6 +14,13 @@ class Post(Base):
     message_id = Column(BigInteger, nullable=False)
     timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
 
+    def __init__(self, id: int, chat_id: int, poster_id: int, message_id: int, timestamp: datetime):
+       self.id: int = id
+       self.chat_id: int = chat_id
+       self.poster_id: int = poster_id
+       self.message_id: int = message_id
+       self.timestamp: datetime = timestamp or datetime.now()
+
 class Interaction(Base):
     __tablename__ = 'interaction'
     id = Column(Integer, primary_key=True)
@@ -22,6 +29,14 @@ class Interaction(Base):
     message_id = Column(BigInteger, nullable=False)
     user_id = Column(BigInteger, nullable=False)
     reaction = Column(Boolean, nullable=False)
+
+    def __init__(self, id: int, chat_id: int, poster_id: int, message_id: int, user_id: int, reaction: bool):
+        self.id: int = id
+        self.chat_id: int = chat_id
+        self.poster_id: int = poster_id
+        self.message_id: int = message_id
+        self.user_id: int = user_id
+        self.reaction: bool = reaction
 
 # Create SQLite database engine
 engine = create_engine('sqlite:///sqlite.db')

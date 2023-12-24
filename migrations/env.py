@@ -1,3 +1,4 @@
+from models import Base  # Импорт вашей модели
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -10,7 +11,6 @@ from pathlib import Path
 # Это добавляет путь к корневому каталогу проекта в sys.path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from models import Base  # Импорт вашей модели
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -50,6 +50,7 @@ def run_migrations_offline() -> None:
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
+        compare_type=True,
         dialect_opts={"paramstyle": "named"},
     )
 
