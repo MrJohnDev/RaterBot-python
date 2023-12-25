@@ -370,8 +370,6 @@ async def HandleTopPosts(msg: Message, period: Period):
 
     minus = dict(zip(minus_query['MessageId'], minus_query['COUNT(*)']))
 
-    userIdToUser = {}
-
     # Вычитаем минусы из плюсов
     keys = list(plus.keys())
     for key in keys:
@@ -380,11 +378,8 @@ async def HandleTopPosts(msg: Message, period: Period):
     # Сортируем по убыванию и берем топ-20
     top_posts = sorted(plus.items(), key=lambda x: x[1], reverse=True)[:20]
 
-    userIdToUser = {}
-
-    for messageId, userId in messageIdToUserId.items():
-        member = await msg.bot.get_chat_member(chat.id, userId)
-        userIdToUser[userId] = member.user
+    userIds = list(x[1] for x in messageIdToUserId.items())
+    userIdToUser = await GetTelegramUsers(chat, userIds)
 
 
     message = f"Топ постов за {ForLast(period)}:\n"
@@ -424,8 +419,6 @@ async def HandleTopAuthors(msg: Message, period: Period):
     plus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
 
     plus = dict(zip(plus_query['MessageId'], plus_query['COUNT(*)']))
-    messageIdToUserId = dict(
-        zip(plus_query['MessageId'], plus_query['PosterId']))
 
     # Если нет плюсов, отправляем сообщение и завершаем выполнение
     if not plus:
@@ -445,12 +438,9 @@ async def HandleTopAuthors(msg: Message, period: Period):
     # Сортировка и взятие топ-20
     top_authors = sorted(grouped_data.values(), key=lambda x: (
         x['Hindex'], x['Likes']), reverse=True)[:20]
-
-    userIdToUser = {}
-
-    for messageId, userId in messageIdToUserId.items():
-        member = await msg.bot.get_chat_member(chat.id, userId)
-        userIdToUser[userId] = member.user
+    
+    userIds = list(x['Key'] for x in top_authors)
+    userIdToUser = await GetTelegramUsers(chat, userIds)
 
     message = f"Топ авторов за {ForLast(period)}:\n"
     i = 0
@@ -567,6 +557,18 @@ def GetFirstLastName(from_user: User | None) -> str:
         who = "анонима"
     return who
 
+async def GetTelegramUsers(chat: Chat, userIds: list) -> dict:
+    userIdToUser = {}
+    for userId in userIds:
+        try:
+            member = await chat.bot.get_chat_member(chat.id, userId)
+            userIdToUser[userId] = member.user
+        except Exception as e:
+            logging.error(e, "GetTelegramUsers")
+            # User not found for any reason, we don't care.
+            pass
+    return userIdToUser
+        
 
 async def remove_after_some_time(bot_client: Bot, chat: Chat, message_id):
     await asyncio.sleep(10 * 60)  # Подождать 10 минут
