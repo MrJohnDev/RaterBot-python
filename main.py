@@ -2,7 +2,7 @@
 from enum import Enum
 import asyncio
 import sqlite3
-import os
+import os, re
 import sys
 import logging
 from datetime import datetime, timedelta
@@ -14,7 +14,12 @@ from models import Post, Interaction  # Импорт классов из models.
 
 from aiogram import Bot, Dispatcher
 from aiogram import Router, F
+from aiogram import types
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message, User, Chat
+
+from aiogram.enums import ChatAction
+from aiogram.enums import ParseMode
 
 from alembic.config import Config
 from alembic import command
@@ -22,6 +27,8 @@ from alembic import command
 import pandas as pd
 
 from dotenv import load_dotenv
+
+from yt import run_yt_dlp
 
 load_dotenv()
 
@@ -300,6 +307,8 @@ async def HandleTextReplyAsync(msg: Message):
         return
 
     new_message = await msg.bot.send_message(msg.chat.id, f"{AtMentionUsername(from_user)}:\n{reply_to.text}", reply_markup=new_post_ikm)
+    await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
+    
     try:
         await msg.bot.delete_message(msg.chat.id, msg.message_id)
     except Exception as ex:  # TODO replace Exception
@@ -309,7 +318,7 @@ async def HandleTextReplyAsync(msg: Message):
     if (msg.from_user.id == from_user.id):
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=reply_to.message_id)
 
-    await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
+    
 
 
 @router.message(Command(commands=["top_posts_day", "top_posts_week", "top_posts_month"]))
@@ -406,7 +415,7 @@ async def HandleTopPosts(msg: Message, period: Period):
         message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
 
     # Отправляем сообщение
-    m = await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+    m = await msg.bot.send_message(chat.id, message, parse_mode=ParseMode.MARKDOWN_V2)
 
     asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
     asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
@@ -463,7 +472,7 @@ async def HandleTopAuthors(msg: Message, period: Period):
         message += f"{GetPlace(i)} {userMentition} очков: {item['Hindex']}, апвоутов: {item['Likes']}\n"
 
     # Отправляем сообщение
-    m = await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
+    m = await msg.bot.send_message(chat.id, message, parse_mode=ParseMode.MARKDOWN_V2)
 
     asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
     asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
@@ -491,9 +500,10 @@ async def handle_media_message(msg: Message):
 
     try:
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
-                                                 reply_markup=new_post_ikm, caption=GenerateCaption(from_user, msg.caption), parse_mode="MarkdownV2")
-        await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
+                                                 reply_markup=new_post_ikm, caption=GenerateCaption(from_user, msg.caption), parse_mode=ParseMode.MARKDOWN_V2)
         await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
+        
+        await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
@@ -557,9 +567,40 @@ def link_to_supergroup_message(chat: Chat, message_id: int):
 def link_to_group_with_name_message(chat: Chat, message_id: int):
     return f"https://t.me/{chat.username}/{message_id}"
 
+
+tt_re = r'^.*https:\/\/(?:m|www|vm)?\.?tiktok\.com\/((?:.*\b(?:(?:usr|v|embed|user|video)\/|\?shareId=|\&item_id=)(\d+))|\w+)'
+@router.message(F.text.regexp(tt_re))
+async def tiktok_handler(msg: Message):
+    # Send a message indicating that the video is being downloaded
+    tt_re_link = r'https:\/\/(?:m|www|vm)?\.?tiktok\.com\/((?:.*\b(?:(?:usr|v|embed|user|video)\/|\?shareId=|\&item_id=)(\d+))|\w+)'
+    link = re.search(tt_re_link, msg.text, re.I)[0]
+    text = msg.text.split(link)[0]
+    try:
+        await msg.bot.delete_message(msg.chat.id, msg.message_id)
+        await msg.bot.send_chat_action(msg.chat.id, action=ChatAction.RECORD_VIDEO_NOTE)
+        video_file_path = await run_yt_dlp(link)
+        if(video_file_path == ''): return
+        await msg.bot.send_chat_action(msg.chat.id, action=ChatAction.UPLOAD_VIDEO)
+        new_message = await msg.bot.send_video(
+            msg.chat.id,
+            video=types.FSInputFile(path=video_file_path),
+            caption=GenerateCaption(msg.from_user, text),
+            disable_notification=True,
+            reply_markup=new_post_ikm,
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        await InsertIntoPosts(msg.chat.id, msg.from_user.id, new_message.message_id)
+    except Exception as e:
+        logging.exception(f"Exception during answer_video: {e}")
+    finally:
+        os.remove(video_file_path)
+
+    
+
+
 def GenerateCaption(user: User | None, text: str | None) -> str:
     mention = MentionUsername(user)
-    if (text != None):
+    if (text != None and text != ''):
         return f"{mention}:\n\n{text}"
     return mention
 
