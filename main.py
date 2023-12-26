@@ -401,7 +401,7 @@ async def HandleTopPosts(msg: Message, period: Period):
 
         link = link_to_supergroup_message(
             chat, item[0]) if sg else link_to_group_with_name_message(chat, item[0])
-        message += f"{GetPlace(i)} От [{userMentition}]({link}) "
+        message += f"{GetPlace(i)} [От {userMentition}]({link}) "
         message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
 
     # Отправляем сообщение
@@ -536,7 +536,7 @@ def link_to_group_with_name_message(chat: Chat, message_id: int):
 
 def MentionUsername(from_user: User | None) -> str:
     whoEscaped = UserEscaped(from_user)
-    return f"От [{whoEscaped}](tg://user?id={from_user.id})"
+    return f"[От {whoEscaped}](tg://user?id={from_user.id})"
 
 
 def UserEscaped(from_user: User | None) -> str:
@@ -556,7 +556,7 @@ def UserEscaped(from_user: User | None) -> str:
 def AtMentionUsername(from_user: User | None) -> str:
     if (not from_user.username or from_user.username.isspace()):
         who = GetFirstLastName(from_user)
-        return f"От поехавшего {who} без ника в телеге"
+        return f"От {who} без ника в телеге"
     return f"От @{from_user.username}"
 
 
