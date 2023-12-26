@@ -1,6 +1,7 @@
 # pip install aiogram
 from enum import Enum
 import asyncio
+import configparser
 import sqlite3
 import os, re
 import sys
@@ -52,18 +53,41 @@ if (bot_name is None):
 router = Router()
 
 
+
+
+
+
+
 # Constants
 update_limit = 100
 timeout = 1800
-db_path = "sqlite.db"
+db_dir = 'db'
+db_name = 'sqlite.db'
+db_path = os.path.join(db_dir, db_name)
 bot_id = 0
+
+def update_db_path(file_path: str):
+    if not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir)
+        except Exception as e:
+            logging.exception(f"Exception during directory creation: {e}")
+    # Read the alembic.ini file
+    config = configparser.ConfigParser()
+    config.read('alembic.ini')
+
+    # Set the dynamic URL in the [alembic] section
+    config.set('alembic', 'sqlalchemy.url', "sqlite:///" + file_path.replace('\\', ''))
+
+    # Write the modified configuration back to alembic.ini
+    with open('alembic.ini', 'w') as config_file:
+        config.write(config_file)
 
 
 # Initialize SQLite
 sqlite3.enable_callback_tracebacks(True)
 
-# Initialize SQLite connection
-db_connection = sqlite3.connect(db_path)
+
 
 # Inline keyboard markup
 new_post_ikm = InlineKeyboardMarkup(inline_keyboard=[
@@ -91,16 +115,16 @@ def ForLast(period: Period) -> str:
 
 
 async def init_and_migrate_db():
+    update_db_path(db_path)
+    await migrate_database()
     db_connection.execute("PRAGMA synchronous = NORMAL;")
     db_connection.execute("PRAGMA vacuum;")
     db_connection.execute("PRAGMA temp_store = memory;")
-    await migrate_database()
 
 
 async def migrate_database():
     global db_connection
     logging.info('db migrate')
-    db_connection.close()
     try:
         alembic_cfg = Config("alembic.ini")
         command.upgrade(alembic_cfg, "head")
