@@ -26,15 +26,13 @@ class Interaction(Base):
     __tablename__ = 'Interaction'
     Id = Column(Integer, primary_key=True)
     ChatId = Column(BigInteger, nullable=False)
-    PosterId = Column(BigInteger, nullable=False)
     MessageId = Column(BigInteger, nullable=False)
     UserId = Column(BigInteger, nullable=False)
     Reaction = Column(Boolean, nullable=False)
 
-    def __init__(self, id: int = 0, chat_id: int = 0, poster_id: int = 0, message_id: int = 0, user_id: int = 0, reaction: bool = True):
+    def __init__(self, id: int = 0, chat_id: int = 0, message_id: int = 0, user_id: int = 0, reaction: bool = True):
         self.Id: int = id
         self.ChatId: int = chat_id
-        self.PosterId: int = poster_id
         self.MessageId: int = message_id
         self.UserId: int = user_id
         self.Reaction: bool = reaction

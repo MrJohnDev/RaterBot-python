@@ -55,3 +55,4 @@ sqlite.**
 .env
 .venv/**
 cache/**
+**.DS_Store
