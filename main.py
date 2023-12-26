@@ -20,7 +20,6 @@ from alembic.config import Config
 from alembic import command
 
 import pandas as pd
-from itertools import count
 
 from dotenv import load_dotenv
 
@@ -28,6 +27,8 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+
+previous_media_group_id = ""
 
 # Initialize Telegram Bot
 bot_token = os.getenv("TELEGRAM_MEDIA_RATER_BOT_API")
@@ -475,7 +476,8 @@ async def handle_media_message(msg: Message):
 # @router.message(and_f((F.photo | F.video | F.document), invert_f(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))))
 
 
-@router.message(F.photo | F.video | F.document)
+@router.message(F.media_group_id.is_(None), (F.photo | F.video))
+@router.message(F.media_group_id.is_(None), F.document.mime_type.startswith('image') | F.document.mime_type.startswith('video'))
 async def handle_media_message(msg: Message):
     logging.info("New valid media message")
     from_user = msg.from_user
@@ -485,6 +487,7 @@ async def handle_media_message(msg: Message):
     if (msg.reply_to_message != None):
         logging.info("Reply media messages should be ignored")
         return
+    
 
     try:
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
@@ -493,6 +496,27 @@ async def handle_media_message(msg: Message):
         await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
     except Exception as ex:
         print(ex, "Cannot handle media message")
+
+@router.message(F.media_group_id, F.from_user[F.is_bot.is_(False)], flags={"throttling_key": "album"})
+async def handle_media_group(msg: Message):
+    global previous_media_group_id
+
+
+    if(previous_media_group_id == msg.media_group_id): return
+    previous_media_group_id = msg.media_group_id
+
+    logging.info("New valid media group")
+
+    from_user = msg.from_user
+    if(from_user == None): return
+
+    try:
+        new_message = await msg.bot.send_message(msg.chat.id, "Оценить альбом", reply_to_message_id = msg.message_id, reply_markup = new_post_ikm)
+        await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
+        
+    except Exception as ex:
+        logging.error(ex, "Cannot handle media group")
+
 
 
 async def InsertIntoPosts(chat_id: int, poster_id: int, message_id: int):
