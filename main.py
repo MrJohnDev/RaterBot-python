@@ -31,6 +31,9 @@ from dotenv import load_dotenv
 
 from yt import run_yt_dlp
 
+from tg.types import Album
+from tg.middlewares.album import AlbumMiddleware
+
 load_dotenv()
 
 # Configure logging
@@ -502,12 +505,16 @@ async def HandleTopAuthors(msg: Message, period: Period):
     asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
 
 
+# Skipper Media
 @router.message(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))
 async def handle_media_message(msg: Message):
     logging.info("Media message that should be ignored")
 
-# @router.message(and_f((F.photo | F.video | F.document), invert_f(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))))
 
+# Skipper Album
+@router.message(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))
+async def handle_media_message(msg: Message, album: Album):
+    logging.info("Media album message that should be ignored")
 
 @router.message(F.media_group_id.is_(None), (F.photo | F.video))
 @router.message(F.media_group_id.is_(None), F.document.mime_type.startswith('image') | F.document.mime_type.startswith('video'))
@@ -531,14 +538,10 @@ async def handle_media_message(msg: Message):
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
-@router.message(F.media_group_id, F.from_user[F.is_bot.is_(False)], flags={"throttling_key": "album"})
-async def handle_media_group(msg: Message):
-    global previous_media_group_id
-
-
-    if(previous_media_group_id == msg.media_group_id): return
-    previous_media_group_id = msg.media_group_id
-
+# @router.message(F.media_group_id, F.from_user[F.is_bot.is_(False)], (F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore').is_(False)), flags={"throttling_key": "album"})
+# @router.message(F.media_group_id, F.from_user[F.is_bot.is_(False)], (F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore').is_(False)))
+@router.message(F.media_group_id)
+async def handle_media_group(msg: Message, album: Album):
     logging.info("New valid media group")
 
     from_user = msg.from_user
@@ -691,6 +694,7 @@ async def main() -> None:
     bot = Bot(token=bot_token)
     bot_id = (await bot.get_me()).id
     dp = Dispatcher()
+    dp.message.middleware(AlbumMiddleware())
     dp.include_routers(router)
     logging.info('bot started')
     await dp.start_polling(bot, skip_updates=True)
