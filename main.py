@@ -383,19 +383,26 @@ async def HandleTopPosts(msg: Message, period: Period):
 
 
     message = f"Топ постов за {ForLast(period)}:\n"
-    i = 0
+
     sg = chat.type == ChatType.SUPERGROUP
-    for item in top_posts:
+    for i, item in enumerate(top_posts):
         plus_symb = '\+'
 
-        userId = messageIdToUserId[item[0]]
-        user = userIdToUser[userId]
+        
+
+        userMentition = "покинувшего чат пользователя"
+        try:
+            userId = messageIdToUserId[item[0]]
+            user = userIdToUser[userId]
+            userMentition = UserEscaped(user)
+        except Exception as e:
+            logging.error('User not exist')
+            pass
 
         link = link_to_supergroup_message(
             chat, item[0]) if sg else link_to_group_with_name_message(chat, item[0])
-        message += f"{GetPlace(i)} [От {UserEscaped(user)}]({link}) "
+        message += f"{GetPlace(i)} От [{userMentition}]({link}) "
         message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
-        i += 1
 
     # Отправляем сообщение
     m = await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
@@ -443,11 +450,16 @@ async def HandleTopAuthors(msg: Message, period: Period):
     userIdToUser = await GetTelegramUsers(chat, userIds)
 
     message = f"Топ авторов за {ForLast(period)}:\n"
-    i = 0
-    for item in top_authors:
-        user = userIdToUser[item['Key']]
-        message += f"{GetPlace(i)} {UserEscaped(user)} очков: {item['Hindex']}, апвоутов: {item['Likes']}\n"
-        i += 1
+
+    for i, item in enumerate(top_authors):
+        userMentition = "покинувший чат пользователь"
+        try:
+            user = userIdToUser[item['Key']]
+            userMentition = UserEscaped(user)
+        except Exception as e:
+            logging.error('User not exist')
+            pass
+        message += f"{GetPlace(i)} {userMentition} очков: {item['Hindex']}, апвоутов: {item['Likes']}\n"
 
     # Отправляем сообщение
     m = await msg.bot.send_message(chat.id, message, parse_mode="MarkdownV2")
@@ -544,7 +556,7 @@ def UserEscaped(from_user: User | None) -> str:
 def AtMentionUsername(from_user: User | None) -> str:
     if (not from_user.username or from_user.username.isspace()):
         who = GetFirstLastName(from_user)
-        return f"поехавшего {who} без ника в телеге"
+        return f"От поехавшего {who} без ника в телеге"
     return f"От @{from_user.username}"
 
 
