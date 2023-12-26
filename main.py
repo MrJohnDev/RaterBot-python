@@ -488,7 +488,7 @@ async def handle_media_message(msg: Message):
 
     try:
         new_message = await msg.bot.copy_message(chat_id=msg.chat.id, from_chat_id=msg.chat.id, message_id=msg.message_id,
-                                                 reply_markup=new_post_ikm, caption=MentionUsername(from_user), parse_mode="MarkdownV2")
+                                                 reply_markup=new_post_ikm, caption=GenerateCaption(from_user, msg.caption), parse_mode="MarkdownV2")
         await msg.bot.delete_message(chat_id=msg.chat.id, message_id=msg.message_id)
         await InsertIntoPosts(msg.chat.id, from_user.id, new_message.message_id)
     except Exception as ex:
@@ -533,6 +533,11 @@ def link_to_supergroup_message(chat: Chat, message_id: int):
 def link_to_group_with_name_message(chat: Chat, message_id: int):
     return f"https://t.me/{chat.username}/{message_id}"
 
+def GenerateCaption(user: User | None, text: str | None) -> str:
+    mention = MentionUsername(user)
+    if (text != None):
+        return f"{mention}:\n\n{text}"
+    return mention
 
 def MentionUsername(from_user: User | None) -> str:
     whoEscaped = UserEscaped(from_user)
