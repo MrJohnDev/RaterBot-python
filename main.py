@@ -504,15 +504,17 @@ async def HandleTopAuthors(msg: Message, period: Period):
     asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
     asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
 
+should_be_skipped = F.caption.lower().contains('/skip') | F.caption.lower().contains('#skip') | F.caption.lower().contains('/ignore') | F.caption.lower().contains('#ignore')
+
 
 # Skipper Media
-@router.message(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))
+@router.message(should_be_skipped)
 async def handle_media_message(msg: Message):
     logging.info("Media message that should be ignored")
 
 
 # Skipper Album
-@router.message(F.caption.contains('/skip') | F.caption.contains('#skip') | F.caption.contains('/ignore') | F.caption.contains('#ignore'))
+@router.message(should_be_skipped)
 async def handle_media_message(msg: Message, album: Album):
     logging.info("Media album message that should be ignored")
 
