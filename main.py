@@ -191,9 +191,9 @@ async def handle_callback_data(query: CallbackQuery):
             cursor.execute(sql, (new_reaction, interaction.Id))
             interaction.Reaction = new_reaction
         else:
-            sql = f"INSERT INTO {Interaction.__tablename__} (ChatId, UserId, MessageId, Reaction, PosterId) VALUES (?, ?, ?, ?, ?);"
+            sql = f"INSERT INTO {Interaction.__tablename__} (ChatId, UserId, MessageId, Reaction) VALUES (?, ?, ?, ?);"
             cursor.execute(sql, (msg.chat.id, query.from_user.id,
-                           msg.message_id, new_reaction, post.PosterId))
+                           msg.message_id, new_reaction))
             interactions.append(Interaction(reaction=new_reaction))
 
         likes = sum(1 for i in interactions if i.Reaction)
@@ -235,56 +235,33 @@ async def handle_callback_data(query: CallbackQuery):
 async def handle_text_message(msg: Message):
     try:
         if (msg.reply_to_message == None):
-            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
-
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку"))
             return
 
         if (msg.reply_to_message.from_user.id != bot_id):
-            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота"))
             return
 
         if (not msg.reply_to_message.text or msg.reply_to_message.text.isspace()):
-            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
-
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку"))
             return
         await HandleTextReplyAsync(msg)
     except Exception as ex:
         print(ex, "Cannot handle media message")
 
 
-@router.message(Command("delete"))
+@router.message(Command(commands=["delete"]))
 async def handle_delete_message(msg: Message):
     try:
         if (msg.reply_to_message == None):
-            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку")
-
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку"))
             return
 
         if msg.reply_to_message.from_user is None:
             return
 
         if (msg.reply_to_message.from_user.id != bot_id):
-            m = await msg.reply("Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота")
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Эту команду нужно вызывать реплаем на текстовое сообщение или ссылку не от бота"))
             return
 
         sqlParams = (msg.chat.id, msg.reply_to_message.message_id)
@@ -293,22 +270,14 @@ async def handle_delete_message(msg: Message):
         post = db_connection.execute(sql, sqlParams).fetchone()
 
         if (post == None):
-            m = await msg.bot.send_message(msg.chat.id, "Это сообщение нельзя удалить")
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Это сообщение нельзя удалить"))
             return
 
         if msg.from_user is None:
             return
 
         if (post[2] != msg.from_user.id):
-            m = await msg.bot.send_message(msg.chat.id, "Нельзя удалить чужой пост")
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, m.message_id))
-            asyncio.create_task(remove_after_some_time(
-                msg.bot, msg.chat, msg.message_id))
+            asyncio.create_task(reply_and_delete_later(msg.bot, msg, "Нельзя удалить чужой пост"))
             return
 
         await msg.bot.delete_message(msg.chat.id, msg.reply_to_message.message_id)
@@ -375,6 +344,85 @@ async def handle_top_authors_month(msg: Message):
 
     await HandleTopAuthors(msg, period)
 
+@router.message(Command(commands=["controversial_month", "controversial_week"]))
+async def handle_controversial_posts(msg: Message):
+    logging.info("Controversial Posts")
+    if(msg.text == None): return
+
+    period=Period.Week
+
+    if('controversial_week' in str(msg.text)): period=Period.Week
+    if('controversial_month' in str(msg.text)): period=Period.Month
+
+    await HandleControversialPosts(msg, period)
+
+async def HandleControversialPosts(msg: Message, period: Period):
+    logging.info("HandleControversialPosts")
+    chat = msg.chat
+    if (chat.type != ChatType.SUPERGROUP and (not chat.username or chat.username.isspace())):
+        await msg.bot.send_message(chat, "Этот чат не является супергруппой и не имеет имени: нет возможности оставлять ссылки на посты")
+        logging.info(
+            f"{(HandleTopPosts)} - unable to link top posts, skipping")
+        return
+
+    time_ago = (datetime.utcnow() - period.value).timestamp()
+
+    sql_params = {'TimeAgo': time_ago, 'ChatId': chat.id}
+    sql = GetControversialPosts()
+    posts_query = pd.read_sql_query(sql, db_connection, params=sql_params)
+
+    posts = dict(zip(posts_query['MessageId'], posts_query['COUNT(*)']))
+    messageIdToUserId = dict(
+        zip(posts_query['MessageId'], posts_query['PosterId']))
+
+    # Если нет плюсов, отправляем сообщение и завершаем выполнение
+    if not posts:
+        await msg.bot.send_message(chat.id, f"Не найдено заплюсованных постов за {ForLast(period)}")
+        logging.info(f"handle_top_week_posts - no upvoted posts, skipping")
+        return
+
+    # Запрос для получения минусов
+    sql = GetMessageIdMinusCountSql()
+
+    minus_query = pd.read_sql_query(sql, db_connection, params=sql_params)
+
+    minus = dict(zip(minus_query['MessageId'], minus_query['COUNT(*)']))
+
+    # Вычитаем минусы из плюсов
+    keys = list(plus.keys())
+    for key in keys:
+        plus[key] -= minus.get(key, 0)
+
+    # Сортируем по убыванию и берем топ-20
+    top_posts = sorted(plus.items(), key=lambda x: x[1], reverse=True)[:20]
+
+    userIds = list(x[1] for x in messageIdToUserId.items())
+    userIdToUser = await GetTelegramUsers(chat, userIds)
+
+
+    message = f"Топ постов за {ForLast(period)}:\n"
+
+    sg = chat.type == ChatType.SUPERGROUP
+    for i, item in enumerate(top_posts):
+        plus_symb = '\+'
+
+        userMentition = "покинувшего чат пользователя"
+        try:
+            userId = messageIdToUserId[item[0]]
+            user = userIdToUser[userId]
+            userMentition = UserEscaped(user)
+        except Exception as e:
+            logging.error('User not exist')
+            pass
+
+        link = link_to_supergroup_message(
+            chat, item[0]) if sg else link_to_group_with_name_message(chat, item[0])
+        message += f"{GetPlace(i)} [От {userMentition}]({link}) "
+        message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
+
+    # Отправляем сообщение
+    asyncio.create_task(reply_and_delete_later(msg.bot, msg, message))
+
 
 async def HandleTopPosts(msg: Message, period: Period):
     chat = msg.chat
@@ -425,8 +473,6 @@ async def HandleTopPosts(msg: Message, period: Period):
     for i, item in enumerate(top_posts):
         plus_symb = '\+'
 
-        
-
         userMentition = "покинувшего чат пользователя"
         try:
             userId = messageIdToUserId[item[0]]
@@ -442,10 +488,7 @@ async def HandleTopPosts(msg: Message, period: Period):
         message += f"{plus_symb if item[1] > 0 else ''}{item[1]}\n"
 
     # Отправляем сообщение
-    m = await msg.bot.send_message(chat.id, message, parse_mode=ParseMode.MARKDOWN_V2)
-
-    asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
-    asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
+    asyncio.create_task(reply_and_delete_later(msg.bot, msg, message))
 
 
 async def HandleTopAuthors(msg: Message, period: Period):
@@ -499,19 +542,9 @@ async def HandleTopAuthors(msg: Message, period: Period):
         message += f"{GetPlace(i)} {userMentition} очков: {item['Hindex']}, апвоутов: {item['Likes']}\n"
 
     # Отправляем сообщение
-    m = await msg.bot.send_message(chat.id, message, parse_mode=ParseMode.MARKDOWN_V2)
-
-    asyncio.create_task(remove_after_some_time(msg.bot, chat, m.message_id))
-    asyncio.create_task(remove_after_some_time(msg.bot, chat, msg.message_id))
+    asyncio.create_task(reply_and_delete_later(msg.bot, msg, message))
 
 should_be_skipped = F.caption.lower().contains('/skip') | F.caption.lower().contains('#skip') | F.caption.lower().contains('/ignore') | F.caption.lower().contains('#ignore')
-
-
-# Skipper Media
-@router.message(should_be_skipped)
-async def handle_media_message(msg: Message):
-    logging.info("Media message that should be ignored")
-
 
 # Skipper Album
 @router.message(should_be_skipped)
@@ -571,7 +604,7 @@ async def InsertIntoPosts(chat_id: int, poster_id: int, message_id: int):
 
 def GetMessageIdPlusCountPosterIdSql() -> str:
     sql_plus = (
-        f"SELECT {Interaction.MessageId}, COUNT(*), {Interaction.PosterId}"
+        f"SELECT {Interaction.MessageId}, COUNT(*), {Post.PosterId}"
         f" FROM {Post.__tablename__} INNER JOIN {Interaction.__tablename__} ON {Post.MessageId} = {Interaction.MessageId}"
         f" WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @TimeAgo AND {Interaction.Reaction} = true"
         f" GROUP BY {Interaction.MessageId};"
@@ -587,6 +620,22 @@ def GetMessageIdMinusCountSql() -> str:
         f" GROUP BY {Interaction.MessageId};"
     )
     return sql_minus
+
+def GetControversialPosts() -> str:
+    sql_plus = (
+        f"SELECT TOP 20"
+        f"  p.*,"
+        f"  (SELECT COUNT(*) FROM {Interaction.__tablename__} WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @TimeAgo AND {Post.Id} = p.Id AND {Interaction.Reaction} = true) AS Likes,"
+        f"  (SELECT COUNT(*) FROM {Interaction.__tablename__} WHERE {Post.ChatId} = @ChatId AND {Interaction.ChatId} = @ChatId AND {Post.Timestamp} > @TimeAgo AND {Post.Id} = p.Id AND {Interaction.Reaction} = false) AS Dislikes"
+        f"FROM"
+        f"  Posts p"
+        f"ORDER BY"
+        f"  Dislikes DESC,"
+        f"  Likes ASC;"
+    )
+    logging.info(sql_plus)
+    return sql_plus
+
 
 
 def link_to_supergroup_message(chat: Chat, message_id: int):
@@ -681,9 +730,12 @@ async def GetTelegramUsers(chat: Chat, userIds: list) -> dict:
     return userIdToUser
         
 
-async def remove_after_some_time(bot_client: Bot, chat: Chat, message_id):
+async def reply_and_delete_later(bot_client: Bot, message: Message, text: str, parse_mode: ParseMode | None):
+    sent_message = await bot_client.send_message(message.chat.id, text, reply_to_message_id=message.message_id, parse_mode=parse_mode, disable_notification=True)
     await asyncio.sleep(10 * 60)  # Подождать 10 минут
-    await bot_client.delete_message(chat.id, message_id)
+    # Удаляем отправленное сообщение и сообщение, на которое был дан ответ
+    await bot_client.delete_message(message.chat.id, sent_message.message_id)
+    await bot_client.delete_message(message.chat.id, message.message_id)
 
 
 def GetPlace(i: int) -> str:
